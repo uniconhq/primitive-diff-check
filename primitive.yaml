@@ -1,0 +1,12 @@
+name: unicon/diff-check
+version: v1
+entrypoint: [/usr/local/bin/diff-check]
+batch: true
+limits: {time_ms: 5000, cpu_ms: 5000, memory_mb: 256, pids: 32, output_mb: 1}
+limits_from: {}
+inputs:
+  actual: {type: file}
+  expected: {type: file}
+outputs:
+  outcome: {type: outcome}
+  points: {type: number}
