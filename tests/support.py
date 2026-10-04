@@ -67,5 +67,5 @@ def batch_inputs(work: Path, pairs: dict[str, tuple[bytes, bytes]]) -> None:
                 },
             }
         )
-    document = {"schema_version": 3, "step": "check", "batch": batch}
+    document = {"schema_version": 4, "batch": batch}
     (work / "inputs.json").write_text(json.dumps(document))

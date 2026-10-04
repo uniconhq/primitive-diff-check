@@ -22,7 +22,7 @@ from collections.abc import Iterable, Iterator
 from itertools import zip_longest
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class PrimitiveError(Exception):
