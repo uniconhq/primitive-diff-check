@@ -38,8 +38,7 @@ def test_a_missing_file_is_an_error_inside_the_sandbox(
 ) -> None:
     """A file inputs.json names but the directory lacks is an error, not a grade."""
     document: dict[str, Any] = {
-        "schema_version": 3,
-        "step": "check",
+        "schema_version": 4,
         "batch": [
             {
                 "id": "1",

@@ -11,7 +11,7 @@ from the `Dockerfile`; the program the image runs, `src/diff_check.py`; and
 `primitive.yaml`, the declaration the forge compiler reads to type-check a
 workflow that uses the primitive. The program is one Python file with no
 dependencies. It speaks the primitive contract, `primitive.schema.json`
-version 3, published by the [runner](https://github.com/uniconhq/runner).
+version 4, published by the [runner](https://github.com/uniconhq/runner).
 
 ## What it takes and returns
 
@@ -28,7 +28,8 @@ test. Each item of the batch has these inputs and outputs.
 ## When two files match
 
 Two files match when they have the same lines once trailing whitespace
-(spaces, tabs and carriage returns) is removed from the end of every line and
+(spaces, tabs, carriage returns, vertical tabs and form feeds) is removed
+from the end of every line and
 trailing blank lines are removed from the end of the file. So a missing final
 newline, Windows line endings and stray spaces at line ends do not matter.
 Leading whitespace, the spacing between words and blank lines between other
@@ -58,9 +59,8 @@ test: 5 s of time and CPU, 256 MB of memory, 32 processes and 1 MB of output.
 
 ```
 Dockerfile                  the image: python:3.14-slim and the program
-src/diff_check.py           the program, installed as /usr/local/bin/diff-check
+src/diff_check.py           the program, installed as /usr/local/bin/diff-check, the image's entrypoint
 primitive.yaml              the declaration, without the image line
-scripts/check_declaration.py  checks primitive.yaml against the runner's schema
 tests/                      unit tests, and image tests that run it on Docker
 ```
 
@@ -77,24 +77,33 @@ uv sync --locked
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
-uv run python scripts/check_declaration.py path/to/primitive.schema.json
+uv run python ../runner/scripts/check_declaration.py ../runner/schemas/primitive.schema.json .
 uv run pytest
 ```
+
+The declaration check is the runner's, so it runs from a `runner` checkout
+beside this one, at the release named in `.github/workflows/ci.yaml`.
 
 `uv run pytest` runs the unit tests and the image tests (marked `image`),
 which build the image and run it under the harness's sandbox flags. Without
 Docker the image tests are skipped. They use `PRIMITIVE_IMAGE` instead of
-building when it is set. The declaration test and the checks on every
+building when it is set. The checks on every
 `inputs.json` and `outputs.json` the tests see read the schema from
 `PRIMITIVE_SCHEMA`, or from a `runner` checkout beside this one.
 
-CI runs the checks and unit tests in one job, against `primitive.schema.json`
-from the runner release named in the workflow, and builds the image and runs
-the image tests in another.
+`.github/workflows/ci.yaml` and `release.yaml` call the workflows every
+primitive shares, `primitive-ci.yaml` and `primitive-release.yaml` in the
+[runner](https://github.com/uniconhq/runner) repo, at the runner release this
+primitive is built against, and name the same release as `runner-ref`. They
+check this repo out beside the runner at that release, so the checks read
+its `primitive.schema.json` and run its `scripts/check_declaration.py`. CI
+runs the checks and unit tests in one job, and builds the image and runs the
+image tests in another. Moving to a new runner release is a change to the
+two `uses:` lines and `runner-ref` together.
 
 ## Releasing
 
-Push a tag `v1.2.3` on `main`. The release workflow refuses a tag whose
+Push a tag `v1.2.3` on `main`. The shared release workflow refuses a tag whose
 commit is not on `main`, a tag that differs from the version in
 `pyproject.toml`, and a tag that is not a release of the version
 `primitive.yaml` declares (`v1.2.3` is a release of `v1`). It runs the same

@@ -71,7 +71,7 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
         {"2": (b"4\n", b"4\n"), "10": (b"5\n", b"6\n"), "1": (b"x \n\n", b"x\n")},
     )
     assert outputs(tmp_path) == {
-        "schema_version": 3,
+        "schema_version": 4,
         "batch": [
             {"id": "2", "outputs": {"outcome": "accepted", "points": 1}},
             {"id": "10", "outputs": {"outcome": "wrong_answer", "points": 0}},
@@ -86,25 +86,23 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
         (None, "inputs.json is not in the working directory"),
         ("[1", "inputs.json is not valid JSON"),
         ([], "inputs.json is not a JSON object"),
-        ({"schema_version": 2, "step": "check", "batch": []}, "contract version 3"),
-        ({"schema_version": 3, "step": "check", "inputs": {}}, "no batch list"),
-        ({"schema_version": 3, "step": "check", "batch": [{"id": "1"}]}, "no inputs"),
+        ({"schema_version": 2, "batch": []}, "contract version 4"),
+        ({"schema_version": 4, "inputs": {}}, "no batch list"),
+        ({"schema_version": 4, "batch": [{"id": "1"}]}, "no inputs"),
         (
-            {"schema_version": 3, "step": "check", "batch": [{"id": "", "inputs": {}}]},
+            {"schema_version": 4, "batch": [{"id": "", "inputs": {}}]},
             "has no id",
         ),
         (
             {
-                "schema_version": 3,
-                "step": "check",
+                "schema_version": 4,
                 "batch": [{"id": "1", "inputs": {}}],
             },
             "actual of item 1 is not a file",
         ),
         (
             {
-                "schema_version": 3,
-                "step": "check",
+                "schema_version": 4,
                 "batch": [
                     {
                         "id": "1",
@@ -119,8 +117,7 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
         ),
         (
             {
-                "schema_version": 3,
-                "step": "check",
+                "schema_version": 4,
                 "batch": [
                     {
                         "id": "1",
