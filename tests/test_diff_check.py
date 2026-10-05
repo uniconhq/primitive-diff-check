@@ -1,6 +1,7 @@
 """The comparison and the inputs.json and outputs.json handling, run in-process."""
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,17 @@ def test_differing_files_are_not_the_same(
     right = write(tmp_path / "expected", expected)
     assert not diff_check.same(left, right)
     assert not diff_check.same(right, left)
+
+
+def test_millions_of_trailing_blank_lines_are_judged_at_once(tmp_path: Path) -> None:
+    """A right answer followed by a flood of empty lines is accepted quickly."""
+    left = write(tmp_path / "actual", b"42\n" + b"\n" * 8_000_000)
+    right = write(tmp_path / "expected", b"42\n")
+    started = time.monotonic()
+
+    assert diff_check.same(left, right)
+    assert diff_check.same(right, left)
+    assert time.monotonic() - started < 2
 
 
 def outputs(work: Path) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 [project]
 name = "primitive-diff-check"
-version = "1.1.0"
+version = "1.1.1"
 description = "The Unicon diff-check primitive: compare an output with the expected one."
 readme = "README.md"
 license = "MIT"
