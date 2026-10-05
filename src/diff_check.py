@@ -18,11 +18,11 @@ whole and no text encoding is assumed.
 
 import json
 import sys
-from collections.abc import Iterable, Iterator
-from itertools import zip_longest
 from pathlib import Path
+from typing import BinaryIO
 
 SCHEMA_VERSION = 4
+BLOCK = 1 << 20
 
 
 class PrimitiveError(Exception):
@@ -109,18 +109,29 @@ def check(actual: Path, expected: Path) -> dict[str, object]:
 def same(actual: Path, expected: Path) -> bool:
     """Whether two files match, ignoring trailing whitespace and trailing blank lines.
 
-    Once one file runs out of lines, every line left in the other must be
-    blank, which is what ignoring trailing blank lines means.
+    Lines are compared one by one while both files have them. Once one file
+    runs out, everything left in the other must be blank, which is what
+    ignoring trailing blank lines means; that rest is read in large blocks,
+    so a program that prints millions of empty lines after a right answer is
+    judged in a moment rather than one line at a time past the time limit.
     """
     with actual.open("rb") as left, expected.open("rb") as right:
-        pairs = zip_longest(stripped(left), stripped(right), fillvalue=b"")
-        return all(a == b for a, b in pairs)
+        while True:
+            a, b = left.readline(), right.readline()
+            if not a or not b:
+                return blank_from(a, left) and blank_from(b, right)
+            if a.rstrip() != b.rstrip():
+                return False
 
 
-def stripped(lines: Iterable[bytes]) -> Iterator[bytes]:
-    """Yield each line without its trailing whitespace, line ending included."""
-    for line in lines:
-        yield line.rstrip()
+def blank_from(line: bytes, rest: BinaryIO) -> bool:
+    """Whether `line` and everything after it in `rest` is whitespace."""
+    if line.strip():
+        return False
+    while block := rest.read(BLOCK):
+        if block.strip():
+            return False
+    return True
 
 
 def write_json(path: Path, document: dict[str, object]) -> None:
