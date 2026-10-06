@@ -1,9 +1,9 @@
 # primitive-diff-check
 
 The `unicon/diff-check` primitive: it compares what a program printed with
-the expected answer and gives an outcome and points for that test. It is the
-last step of the `unicon/classic` workflow, after `unicon/compile` and
-`unicon/sandbox-run`, and the outcome a verdict carries for a test that ran
+the expected answer and gives the outcome for that test. It is the last step
+of the `unicon/classic` workflow, after `unicon/compile` and
+`unicon/sandbox-run`, and the outcome a test that ran carries in the result
 comes from here.
 
 This repo holds the image, `ghcr.io/uniconhq/primitive-diff-check`, built
@@ -11,19 +11,29 @@ from the `Dockerfile`; the program the image runs, `src/diff_check.py`; and
 `primitive.yaml`, the declaration the forge compiler reads to type-check a
 workflow that uses the primitive. The program is one Python file with no
 dependencies. It speaks the primitive contract, `primitive.schema.json`
-version 4, published by the [runner](https://github.com/uniconhq/runner).
+version 5, published by the [runner](https://github.com/uniconhq/runner).
 
 ## What it takes and returns
 
 The primitive takes a batch (`batch: true`): one container compares every
-test. Each item of the batch has these inputs and outputs.
+test. A batch item and its answer in `outputs.json` are keyed by `test`, the
+test's id as the plan writes it, `<group>/<test>`, and the answers come in the
+order of the items. Each item has these inputs and outputs.
 
 | | Name | Type | What it is |
 |---|---|---|---|
-| Input | `actual` | file | What the program printed |
-| Input | `expected` | file | The expected answer, from the task |
+| Input | `actual` | file, `runs: false` | What the program printed |
+| Input | `expected` | file, `runs: false` | The expected answer, from the task |
 | Output | `outcome` | outcome | `accepted` when the two match, `wrong_answer` when they do not |
-| Output | `points` | number | `1` when they match, `0` when they do not |
+
+Both inputs are files it reads as data: it runs nothing from either, so
+handing it a task file the contestant is not served seals no step. It writes
+no files of its own, only `outputs.json`.
+
+The outcome is all it gives back. With no `credit` in `task.yaml`, an accepted
+test earns credit 1 and any other test 0; what a test is worth is the
+business of the task's test groups, through their `each`, `worst` and `pass`
+weights.
 
 ## When two files match
 
@@ -42,9 +52,9 @@ whole and no text encoding is assumed.
 
 `outputs.json` carries `error` instead, and nothing else, only when the
 primitive could not work at all: `inputs.json` is missing, is not JSON or is
-for another contract version, an item has no id or no inputs, or a file is
-missing or lies outside `in/`. The harness turns an error into a
-`system_error` verdict, so no contestant is graded by a broken step.
+for another contract version, an item has no test or no inputs, or a file
+is missing or lies outside `in/`. The harness turns an error into a
+`system_error` that stops the run, so no contestant is graded by a broken step.
 
 ## Inside the sandbox
 
@@ -52,8 +62,9 @@ The harness starts the container with no network, a read-only root
 filesystem, every capability dropped, `no-new-privileges`, Docker's built-in
 seccomp profile and a non-root user; the image's user is 65532. The program
 reads the files `inputs.json` names and writes only `/work/outputs.json`,
-whole, under a temporary name first. The limits in `primitive.yaml` are per
-test: 5 s of time and CPU, 256 MB of memory, 32 processes and 1 MB of output.
+whole, under a temporary name first. `primitive.yaml` declares no network
+(`network: false`), and its limits are per test: 5 s of time and CPU, 256 MB
+of memory, 32 processes, 1 MB of output and no GPUs.
 
 ## Layout
 
@@ -103,12 +114,13 @@ two `uses:` lines and `runner-ref` together.
 
 ## Releasing
 
-Push a tag `v1.2.3` on `main`. The shared release workflow refuses a tag whose
-commit is not on `main`, a tag that differs from the version in
-`pyproject.toml`, and a tag that is not a release of the version
-`primitive.yaml` declares (`v1.2.3` is a release of `v1`). It runs the same
-checks as CI, pushes the image as
-`ghcr.io/uniconhq/primitive-diff-check:v1.2.3`, and creates a GitHub release
+Push a tag `v2.0.0` on `main`. The shared release workflow refuses a tag whose
+commit is not on `main` and a tag that differs from the version in
+`pyproject.toml`. The tag's major is the version at the forge: `v2.0.0` and
+`v2.1.0` are both `unicon/diff-check@v2`, and a change to the ports is a new
+major; `primitive.yaml` names no version of its own. The workflow runs the
+same checks as CI, pushes the image as
+`ghcr.io/uniconhq/primitive-diff-check:v2.0.0`, and creates a GitHub release
 with `images.json`, which names the image by digest in the same shape as the
 runner's, and `primitive.yaml` attached, and the digest in the notes.
 `deploy/images.json` pins that digest, and bootstrap writes it into the
