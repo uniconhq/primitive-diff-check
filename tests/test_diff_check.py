@@ -77,17 +77,21 @@ def outputs(work: Path) -> dict[str, Any]:
 
 
 def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
-    """Each item gets its outcome and points, under its own id and in its place."""
+    """Each item gets its outcome alone, under its own test and in its place."""
     batch_inputs(
         tmp_path,
-        {"2": (b"4\n", b"4\n"), "10": (b"5\n", b"6\n"), "1": (b"x \n\n", b"x\n")},
+        {
+            "main/2": (b"4\n", b"4\n"),
+            "main/10": (b"5\n", b"6\n"),
+            "samples/1": (b"x \n\n", b"x\n"),
+        },
     )
     assert outputs(tmp_path) == {
-        "schema_version": 4,
+        "schema_version": 5,
         "batch": [
-            {"id": "2", "outputs": {"outcome": "accepted", "points": 1}},
-            {"id": "10", "outputs": {"outcome": "wrong_answer", "points": 0}},
-            {"id": "1", "outputs": {"outcome": "accepted", "points": 1}},
+            {"test": "main/2", "outputs": {"outcome": "accepted"}},
+            {"test": "main/10", "outputs": {"outcome": "wrong_answer"}},
+            {"test": "samples/1", "outputs": {"outcome": "accepted"}},
         ],
     }
 
@@ -98,26 +102,26 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
         (None, "inputs.json is not in the working directory"),
         ("[1", "inputs.json is not valid JSON"),
         ([], "inputs.json is not a JSON object"),
-        ({"schema_version": 2, "batch": []}, "contract version 4"),
-        ({"schema_version": 4, "inputs": {}}, "no batch list"),
-        ({"schema_version": 4, "batch": [{"id": "1"}]}, "no inputs"),
+        ({"schema_version": 4, "batch": []}, "contract version 5"),
+        ({"schema_version": 5, "inputs": {}}, "no batch list"),
+        ({"schema_version": 5, "batch": [{"test": "main/1"}]}, "no inputs"),
         (
-            {"schema_version": 4, "batch": [{"id": "", "inputs": {}}]},
-            "has no id",
+            {"schema_version": 5, "batch": [{"id": "main/1", "inputs": {}}]},
+            "has no test",
         ),
         (
             {
-                "schema_version": 4,
-                "batch": [{"id": "1", "inputs": {}}],
+                "schema_version": 5,
+                "batch": [{"test": "main/1", "inputs": {}}],
             },
-            "actual of item 1 is not a file",
+            "actual of test main/1 is not a file",
         ),
         (
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "batch": [
                     {
-                        "id": "1",
+                        "test": "main/1",
                         "inputs": {
                             "actual": {"file": "in/../inputs.json"},
                             "expected": {"file": "in/a"},
@@ -125,14 +129,14 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
                     }
                 ],
             },
-            "actual of item 1 is outside in/",
+            "actual of test main/1 is outside in/",
         ),
         (
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "batch": [
                     {
-                        "id": "1",
+                        "test": "main/1",
                         "inputs": {
                             "actual": {"file": "in/missing"},
                             "expected": {"file": "in/a"},
@@ -140,7 +144,7 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
                     }
                 ],
             },
-            "actual of item 1 is not in the working directory",
+            "actual of test main/1 is not in the working directory",
         ),
     ],
 )

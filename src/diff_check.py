@@ -3,11 +3,12 @@
 
 The harness mounts a working directory at `/work` (or the directory named by
 the first argument) holding `inputs.json` and the files under `in/`. The
-inputs are a batch: one item per test, each naming the `actual` output and
-the `expected` one. For every item this program compares the two and reports
-`accepted` with 1 point when they match and `wrong_answer` with 0 points when
-they do not, then writes `outputs.json` with one entry per item in the same
-order.
+inputs are a batch: one item per test, keyed by the test's id, each naming
+the `actual` output and the `expected` one. For every item this program
+compares the two and reports the outcome `accepted` when they match and
+`wrong_answer` when they do not, then writes `outputs.json` with one entry per
+item, under the same test and in the same order. It reads both files as data
+and writes no other file.
 
 Two files match when they have the same lines once trailing whitespace is
 removed from every line and trailing blank lines are removed from the end.
@@ -21,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import BinaryIO
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 BLOCK = 1 << 20
 
 
@@ -42,8 +43,8 @@ def main(argv: list[str]) -> int:
     root = Path(argv[1]) if len(argv) > 1 else Path("/work")
     try:
         batch = [
-            {"id": item_id, "outputs": check(actual, expected)}
-            for item_id, actual, expected in read_inputs(root)
+            {"test": test, "outputs": check(actual, expected)}
+            for test, actual, expected in read_inputs(root)
         ]
         document: dict[str, object] = {"schema_version": SCHEMA_VERSION, "batch": batch}
     except PrimitiveError as error:
@@ -54,7 +55,7 @@ def main(argv: list[str]) -> int:
 
 
 def read_inputs(root: Path) -> list[tuple[str, Path, Path]]:
-    """Read `inputs.json` and return each item's id, actual file and expected file."""
+    """Read `inputs.json` and return each item's test, actual file and expected file."""
     try:
         document = json.loads((root / "inputs.json").read_bytes())
     except FileNotFoundError:
@@ -74,36 +75,36 @@ def read_inputs(root: Path) -> list[tuple[str, Path, Path]]:
     for entry in batch:
         if not isinstance(entry, dict) or not isinstance(entry.get("inputs"), dict):
             raise PrimitiveError("a batch item has no inputs object")
-        item_id = entry.get("id")
-        if not isinstance(item_id, str) or not item_id:
-            raise PrimitiveError("a batch item has no id")
+        test = entry.get("test")
+        if not isinstance(test, str) or not test:
+            raise PrimitiveError("a batch item has no test")
         inputs = entry["inputs"]
-        actual = input_file(root, inputs, "actual", item_id)
-        expected = input_file(root, inputs, "expected", item_id)
-        items.append((item_id, actual, expected))
+        actual = input_file(root, inputs, "actual", test)
+        expected = input_file(root, inputs, "expected", test)
+        items.append((test, actual, expected))
     return items
 
 
-def input_file(root: Path, inputs: dict[str, object], name: str, item_id: str) -> Path:
+def input_file(root: Path, inputs: dict[str, object], name: str, test: str) -> Path:
     """Resolve a file input to a path, refusing anything outside `in/`."""
     value = inputs.get(name)
     if not isinstance(value, dict) or not isinstance(value.get("file"), str):
-        raise PrimitiveError(f"the input named {name} of item {item_id} is not a file")
+        raise PrimitiveError(f"the input named {name} of test {test} is not a file")
     path = (root / str(value["file"])).resolve()
     if not path.is_relative_to((root / "in").resolve()):
-        raise PrimitiveError(f"the input named {name} of item {item_id} is outside in/")
+        raise PrimitiveError(f"the input named {name} of test {test} is outside in/")
     if not path.is_file():
         raise PrimitiveError(
-            f"the input named {name} of item {item_id} is not in the working directory"
+            f"the input named {name} of test {test} is not in the working directory"
         )
     return path
 
 
 def check(actual: Path, expected: Path) -> dict[str, object]:
-    """Compare two files and return the outcome and the points."""
+    """Compare two files and return the outcome."""
     if same(actual, expected):
-        return {"outcome": "accepted", "points": 1}
-    return {"outcome": "wrong_answer", "points": 0}
+        return {"outcome": "accepted"}
+    return {"outcome": "wrong_answer"}
 
 
 def same(actual: Path, expected: Path) -> bool:
