@@ -2,6 +2,7 @@
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,87 @@ def test_millions_of_trailing_blank_lines_are_judged_at_once(tmp_path: Path) -> 
     assert diff_check.same(left, right)
     assert diff_check.same(right, left)
     assert time.monotonic() - started < 2
+
+
+LARGE = 32 * 1024 * 1024
+"""The most a sandbox-run output holds."""
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "matches"),
+    [
+        (lambda: b"1\n" * (LARGE // 2), lambda: b"1\n" * (LARGE // 2), True),
+        (lambda: b"\n" * LARGE, lambda: b"\n" * (LARGE - 2) + b"x\n", False),
+        (lambda: b"1\r\n" * (LARGE // 3), lambda: b"1\n" * (LARGE // 3), True),
+        (lambda: b"1 \n" * (LARGE // 3), lambda: b"1\n" * (LARGE // 3), True),
+        (
+            lambda: b"1" + b" " * LARGE + b"2",
+            lambda: b"1" + b"\t" * LARGE + b"2",
+            False,
+        ),
+        (lambda: b"1" + b" " * LARGE + b"\n2\n", lambda: b"1\n2", True),
+        (lambda: b"x" * LARGE, lambda: b"x" * LARGE + b"\n", True),
+    ],
+)
+def test_the_largest_outputs_are_compared_in_a_moment(
+    tmp_path: Path,
+    actual: Callable[[], bytes],
+    expected: Callable[[], bytes],
+    matches: bool,
+) -> None:
+    """An output as large as sandbox-run keeps, with millions of lines, one
+    line or every line ending in whitespace, is compared with no step per
+    line: in a few seconds at most even on a slow machine."""
+    left = write(tmp_path / "actual", actual())
+    right = write(tmp_path / "expected", expected())
+    for one, two in ((left, right), (right, left)):
+        started = time.monotonic()
+        assert diff_check.same(one, two) is matches
+        assert time.monotonic() - started < 5
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "matches"),
+    [
+        (b"ab  ", b"ab\n", True),
+        (b"ab  \t\n\n", b"ab", True),
+        (b"ab  c", b"ab c", False),
+        (b"ab  c", b"ab  c  \n", True),
+        (b"  \n  ab", b"\nab", False),
+        (b"  \n  ab", b"\n  ab", True),
+        (b"1 2 \n3", b"1 2\n3", True),
+        (b"1 2 \n3", b"1 23", False),
+        (b"xy \t\r\x0b\x0c \nz\n", b"xy\nz", True),
+    ],
+)
+def test_whitespace_across_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    actual: bytes,
+    expected: bytes,
+    matches: bool,
+) -> None:
+    """Whitespace split over the blocks the files are read in is judged as if
+    read whole."""
+    monkeypatch.setattr(diff_check, "BLOCK", 2)
+    left = write(tmp_path / "actual", actual)
+    right = write(tmp_path / "expected", expected)
+    assert diff_check.same(left, right) is matches
+    assert diff_check.same(right, left) is matches
+
+
+@pytest.mark.parametrize(
+    ("data", "lines"),
+    [
+        (b"a\r\nb \n c\t\n", b"a\nb\n c\n"),
+        (b"a \r\n\x0c\n", b"a\n\n"),
+        (b"a \t\r\x0b\x0c \t\nb  c   \n", b"a\nb  c\n"),
+        (b"a b", b"a b"),
+    ],
+)
+def test_trim_lines(data: bytes, lines: bytes) -> None:
+    """Every line loses its trailing whitespace, however long the run."""
+    assert diff_check.trim_lines(data) == lines
 
 
 def outputs(work: Path) -> dict[str, Any]:

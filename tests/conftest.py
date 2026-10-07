@@ -4,7 +4,8 @@ The image tests build the image from this checkout (or use the one named by
 `PRIMITIVE_IMAGE`) and start it with the flags every step container gets: no
 network, a read-only root, every capability dropped, no new privileges,
 Docker's built-in seccomp profile, user 65532, no swap, the declared memory
-and pids limits, one CPU, a small noexec tmpfs at /tmp and the working
+and pids limits, the CPU-time and file-size limits as `RLIMIT_CPU` and
+`RLIMIT_FSIZE`, one CPU, a small noexec tmpfs at /tmp and the working
 directory at /work. They are skipped when Docker is not reachable.
 
 The contract checks use `primitive.schema.json` from `PRIMITIVE_SCHEMA`, or

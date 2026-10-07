@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from support import Check, RunImage, batch_inputs
+from support import Check, RunImage, batch_inputs, declaration
 
 pytestmark = pytest.mark.image
 
@@ -28,6 +28,30 @@ def test_a_batch_is_compared_inside_the_sandbox(
     check(result, "outputs_file")
     assert [(entry["test"], entry["outputs"]) for entry in result["batch"]] == [
         ("samples/1", {"outcome": "accepted"}),
+        ("main/1", {"outcome": "accepted"}),
+        ("main/2", {"outcome": "wrong_answer"}),
+    ]
+
+
+def test_the_largest_outputs_fit_the_limits_inside_the_sandbox(
+    tmp_path: Path, run_image: RunImage
+) -> None:
+    """Outputs as large as sandbox-run keeps, every line ending in whitespace,
+    are compared under the container's memory and its CPU time summed over
+    the batch, which the kernel holds as `RLIMIT_CPU`."""
+    size = 32 * 1024 * 1024
+    batch_inputs(
+        tmp_path,
+        {
+            "main/1": (b"1\r\n" * (size // 3), b"1\n" * (size // 3)),
+            "main/2": (b"1 \n" * (size // 3), b"1\n" * (size // 3 - 1) + b"2\n"),
+        },
+    )
+    limits = dict(declaration()["limits"])
+    limits["time_ms"] *= 2
+    limits["cpu_ms"] *= 2
+    result = run_image(tmp_path, limits)
+    assert [(entry["test"], entry["outputs"]) for entry in result["batch"]] == [
         ("main/1", {"outcome": "accepted"}),
         ("main/2", {"outcome": "wrong_answer"}),
     ]
