@@ -45,8 +45,14 @@ newline, Windows line endings and stray spaces at line ends do not matter.
 Leading whitespace, the spacing between words and blank lines between other
 lines do.
 
-The files are compared as bytes, line by line, so neither is held in memory
-whole and no text encoding is assumed.
+The files are compared as bytes, in blocks of 1 MB, so neither is held in
+memory whole and no text encoding is assumed. Blocks that are the same byte
+for byte are passed over; from the first that differ, the whitespace before
+each newline is taken out with the bytes methods' search and replace, a
+pass for each byte of the longest such run up to four, and the few lines
+with longer runs are then trimmed one by one. Nothing is done line by line
+in Python for ordinary output, and the time is linear in the size of the
+files whatever their lines look like.
 
 ## Errors
 
@@ -63,8 +69,16 @@ filesystem, every capability dropped, `no-new-privileges`, Docker's built-in
 seccomp profile and a non-root user; the image's user is 65532. The program
 reads the files `inputs.json` names and writes only `/work/outputs.json`,
 whole, under a temporary name first. `primitive.yaml` declares no network
-(`network: false`), and its limits are per test: 5 s of time and CPU, 256 MB
-of memory, 32 processes, 1 MB of output and no GPUs.
+(`network: false`), and its limits are per test: 2 s of time and CPU, 256 MB
+of memory, 32 processes, 1 MB of output and no GPUs. The `forge` repo's
+compiler adds up time and CPU over the tests of the batch, so the container
+has the program's start, well under a second, besides. The 2 s cover the
+largest comparison. Measured in the image with one CPU on a loaded laptop on
+which Python ran several times slower than usual: two identical 32 MB
+outputs took 0.05 s; a 32 MB output whose every line ends in a carriage
+return or a space 0.8 to 1.9 s; and the worst shape, every line ending in
+five or more whitespace bytes, 3.5 to 3.9 s, about a second on ordinary
+hardware. Outputs of ordinary size take milliseconds.
 
 ## Layout
 
