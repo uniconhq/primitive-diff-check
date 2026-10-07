@@ -1,11 +1,8 @@
-name: unicon/diff-check
-version: v1
 batch: true
-limits: {time_ms: 5000, cpu_ms: 5000, memory_mb: 256, pids: 32, output_mb: 1}
-limits_from: {}
+network: false
+limits: {time_ms: 2000, cpu_ms: 2000, memory_mb: 256, pids: 32, output_mb: 1, gpus: 0}
 inputs:
-  actual: {type: file}
-  expected: {type: file}
+  actual: {type: file, runs: false}
+  expected: {type: file, runs: false}
 outputs:
   outcome: {type: outcome}
-  points: {type: number}

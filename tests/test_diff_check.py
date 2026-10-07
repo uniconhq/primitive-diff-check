@@ -2,6 +2,7 @@
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,87 @@ def test_millions_of_trailing_blank_lines_are_judged_at_once(tmp_path: Path) -> 
     assert time.monotonic() - started < 2
 
 
+LARGE = 32 * 1024 * 1024
+"""The most a sandbox-run output holds."""
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "matches"),
+    [
+        (lambda: b"1\n" * (LARGE // 2), lambda: b"1\n" * (LARGE // 2), True),
+        (lambda: b"\n" * LARGE, lambda: b"\n" * (LARGE - 2) + b"x\n", False),
+        (lambda: b"1\r\n" * (LARGE // 3), lambda: b"1\n" * (LARGE // 3), True),
+        (lambda: b"1 \n" * (LARGE // 3), lambda: b"1\n" * (LARGE // 3), True),
+        (
+            lambda: b"1" + b" " * LARGE + b"2",
+            lambda: b"1" + b"\t" * LARGE + b"2",
+            False,
+        ),
+        (lambda: b"1" + b" " * LARGE + b"\n2\n", lambda: b"1\n2", True),
+        (lambda: b"x" * LARGE, lambda: b"x" * LARGE + b"\n", True),
+    ],
+)
+def test_the_largest_outputs_are_compared_in_a_moment(
+    tmp_path: Path,
+    actual: Callable[[], bytes],
+    expected: Callable[[], bytes],
+    matches: bool,
+) -> None:
+    """An output as large as sandbox-run keeps, with millions of lines, one
+    line or every line ending in whitespace, is compared with no step per
+    line: in a few seconds at most even on a slow machine."""
+    left = write(tmp_path / "actual", actual())
+    right = write(tmp_path / "expected", expected())
+    for one, two in ((left, right), (right, left)):
+        started = time.monotonic()
+        assert diff_check.same(one, two) is matches
+        assert time.monotonic() - started < 5
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "matches"),
+    [
+        (b"ab  ", b"ab\n", True),
+        (b"ab  \t\n\n", b"ab", True),
+        (b"ab  c", b"ab c", False),
+        (b"ab  c", b"ab  c  \n", True),
+        (b"  \n  ab", b"\nab", False),
+        (b"  \n  ab", b"\n  ab", True),
+        (b"1 2 \n3", b"1 2\n3", True),
+        (b"1 2 \n3", b"1 23", False),
+        (b"xy \t\r\x0b\x0c \nz\n", b"xy\nz", True),
+    ],
+)
+def test_whitespace_across_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    actual: bytes,
+    expected: bytes,
+    matches: bool,
+) -> None:
+    """Whitespace split over the blocks the files are read in is judged as if
+    read whole."""
+    monkeypatch.setattr(diff_check, "BLOCK", 2)
+    left = write(tmp_path / "actual", actual)
+    right = write(tmp_path / "expected", expected)
+    assert diff_check.same(left, right) is matches
+    assert diff_check.same(right, left) is matches
+
+
+@pytest.mark.parametrize(
+    ("data", "lines"),
+    [
+        (b"a\r\nb \n c\t\n", b"a\nb\n c\n"),
+        (b"a \r\n\x0c\n", b"a\n\n"),
+        (b"a \t\r\x0b\x0c \t\nb  c   \n", b"a\nb  c\n"),
+        (b"a b", b"a b"),
+    ],
+)
+def test_trim_lines(data: bytes, lines: bytes) -> None:
+    """Every line loses its trailing whitespace, however long the run."""
+    assert diff_check.trim_lines(data) == lines
+
+
 def outputs(work: Path) -> dict[str, Any]:
     """Run the program over a working directory and read outputs.json."""
     assert diff_check.main(["diff-check", str(work)]) == 0
@@ -77,17 +159,21 @@ def outputs(work: Path) -> dict[str, Any]:
 
 
 def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
-    """Each item gets its outcome and points, under its own id and in its place."""
+    """Each item gets its outcome alone, under its own test and in its place."""
     batch_inputs(
         tmp_path,
-        {"2": (b"4\n", b"4\n"), "10": (b"5\n", b"6\n"), "1": (b"x \n\n", b"x\n")},
+        {
+            "main/2": (b"4\n", b"4\n"),
+            "main/10": (b"5\n", b"6\n"),
+            "samples/1": (b"x \n\n", b"x\n"),
+        },
     )
     assert outputs(tmp_path) == {
-        "schema_version": 4,
+        "schema_version": 5,
         "batch": [
-            {"id": "2", "outputs": {"outcome": "accepted", "points": 1}},
-            {"id": "10", "outputs": {"outcome": "wrong_answer", "points": 0}},
-            {"id": "1", "outputs": {"outcome": "accepted", "points": 1}},
+            {"test": "main/2", "outputs": {"outcome": "accepted"}},
+            {"test": "main/10", "outputs": {"outcome": "wrong_answer"}},
+            {"test": "samples/1", "outputs": {"outcome": "accepted"}},
         ],
     }
 
@@ -98,26 +184,26 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
         (None, "inputs.json is not in the working directory"),
         ("[1", "inputs.json is not valid JSON"),
         ([], "inputs.json is not a JSON object"),
-        ({"schema_version": 2, "batch": []}, "contract version 4"),
-        ({"schema_version": 4, "inputs": {}}, "no batch list"),
-        ({"schema_version": 4, "batch": [{"id": "1"}]}, "no inputs"),
+        ({"schema_version": 4, "batch": []}, "contract version 5"),
+        ({"schema_version": 5, "inputs": {}}, "no batch list"),
+        ({"schema_version": 5, "batch": [{"test": "main/1"}]}, "no inputs"),
         (
-            {"schema_version": 4, "batch": [{"id": "", "inputs": {}}]},
-            "has no id",
+            {"schema_version": 5, "batch": [{"id": "main/1", "inputs": {}}]},
+            "has no test",
         ),
         (
             {
-                "schema_version": 4,
-                "batch": [{"id": "1", "inputs": {}}],
+                "schema_version": 5,
+                "batch": [{"test": "main/1", "inputs": {}}],
             },
-            "actual of item 1 is not a file",
+            "actual of test main/1 is not a file",
         ),
         (
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "batch": [
                     {
-                        "id": "1",
+                        "test": "main/1",
                         "inputs": {
                             "actual": {"file": "in/../inputs.json"},
                             "expected": {"file": "in/a"},
@@ -125,14 +211,14 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
                     }
                 ],
             },
-            "actual of item 1 is outside in/",
+            "actual of test main/1 is outside in/",
         ),
         (
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "batch": [
                     {
-                        "id": "1",
+                        "test": "main/1",
                         "inputs": {
                             "actual": {"file": "in/missing"},
                             "expected": {"file": "in/a"},
@@ -140,7 +226,7 @@ def test_a_batch_gets_one_entry_per_item_in_order(tmp_path: Path) -> None:
                     }
                 ],
             },
-            "actual of item 1 is not in the working directory",
+            "actual of test main/1 is not in the working directory",
         ),
     ],
 )

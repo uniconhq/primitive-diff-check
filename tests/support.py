@@ -1,6 +1,7 @@
 """What the tests share: the declaration, the sandbox flags and test inputs."""
 
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ def declaration() -> dict[str, Any]:
 def sandbox_flags(limits: dict[str, int]) -> list[str]:
     """The docker run flags the harness gives a step container."""
     memory = f"{limits['memory_mb']}m"
+    cpu_seconds = math.ceil(limits["cpu_ms"] / 1000)
+    file_bytes = limits["output_mb"] * 1024 * 1024
     return [
         "--network=none",
         "--read-only",
@@ -34,6 +37,8 @@ def sandbox_flags(limits: dict[str, int]) -> list[str]:
         f"--memory={memory}",
         f"--memory-swap={memory}",
         f"--pids-limit={limits['pids']}",
+        f"--ulimit=cpu={cpu_seconds}:{cpu_seconds}",
+        f"--ulimit=fsize={file_bytes}:{file_bytes}",
         "--cpus=1",
         "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=64m",
     ]
@@ -53,19 +58,23 @@ def write(path: Path, data: bytes) -> Path:
 
 
 def batch_inputs(work: Path, pairs: dict[str, tuple[bytes, bytes]]) -> None:
-    """Write inputs.json and the files for a batch of (actual, expected) pairs."""
+    """Write inputs.json and the files for a batch of (actual, expected) pairs.
+
+    The pairs are keyed by test id, `<group>/<test>`. The files sit under
+    numbered folders, as the harness places them, since an id is no file name.
+    """
     batch = []
-    for number, (item_id, (actual, expected)) in enumerate(pairs.items(), start=1):
-        write(work / "in" / str(number) / "output", actual)
-        write(work / "in" / f"t{number}" / f"{item_id}.ans", expected)
+    for number, (test, (actual, expected)) in enumerate(pairs.items()):
+        write(work / "in" / str(2 * number + 1) / "output", actual)
+        write(work / "in" / str(2 * number + 2) / "answer", expected)
         batch.append(
             {
-                "id": item_id,
+                "test": test,
                 "inputs": {
-                    "actual": {"file": f"in/{number}/output"},
-                    "expected": {"file": f"in/t{number}/{item_id}.ans"},
+                    "actual": {"file": f"in/{2 * number + 1}/output"},
+                    "expected": {"file": f"in/{2 * number + 2}/answer"},
                 },
             }
         )
-    document = {"schema_version": 4, "batch": batch}
+    document = {"schema_version": 5, "batch": batch}
     (work / "inputs.json").write_text(json.dumps(document))

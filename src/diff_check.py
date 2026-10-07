@@ -3,26 +3,33 @@
 
 The harness mounts a working directory at `/work` (or the directory named by
 the first argument) holding `inputs.json` and the files under `in/`. The
-inputs are a batch: one item per test, each naming the `actual` output and
-the `expected` one. For every item this program compares the two and reports
-`accepted` with 1 point when they match and `wrong_answer` with 0 points when
-they do not, then writes `outputs.json` with one entry per item in the same
-order.
+inputs are a batch: one item per test, keyed by the test's id, each naming
+the `actual` output and the `expected` one. For every item this program
+compares the two and reports the outcome `accepted` when they match and
+`wrong_answer` when they do not, then writes `outputs.json` with one entry per
+item, under the same test and in the same order. It reads both files as data
+and writes no other file.
 
 Two files match when they have the same lines once trailing whitespace is
 removed from every line and trailing blank lines are removed from the end.
 Leading whitespace and blank lines between other lines still count. The
-files are compared as bytes, line by line, so neither is ever held in memory
-whole and no text encoding is assumed.
+files are compared as bytes, in blocks, so no text encoding is assumed and
+the time is linear in their size.
 """
 
 import json
 import sys
+from collections.abc import Iterator
+from itertools import chain
 from pathlib import Path
 from typing import BinaryIO
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 BLOCK = 1 << 20
+LINE_SPACE = b" \t\r\x0b\x0c"
+"""The whitespace `bytes.rstrip` takes off the end of a line, but the newline."""
+LINE_ENDS = tuple(bytes((space,)) + b"\n" for space in LINE_SPACE)
+TRIM_PASSES = 4
 
 
 class PrimitiveError(Exception):
@@ -42,8 +49,8 @@ def main(argv: list[str]) -> int:
     root = Path(argv[1]) if len(argv) > 1 else Path("/work")
     try:
         batch = [
-            {"id": item_id, "outputs": check(actual, expected)}
-            for item_id, actual, expected in read_inputs(root)
+            {"test": test, "outputs": check(actual, expected)}
+            for test, actual, expected in read_inputs(root)
         ]
         document: dict[str, object] = {"schema_version": SCHEMA_VERSION, "batch": batch}
     except PrimitiveError as error:
@@ -54,7 +61,7 @@ def main(argv: list[str]) -> int:
 
 
 def read_inputs(root: Path) -> list[tuple[str, Path, Path]]:
-    """Read `inputs.json` and return each item's id, actual file and expected file."""
+    """Read `inputs.json` and return each item's test, actual file and expected file."""
     try:
         document = json.loads((root / "inputs.json").read_bytes())
     except FileNotFoundError:
@@ -74,64 +81,108 @@ def read_inputs(root: Path) -> list[tuple[str, Path, Path]]:
     for entry in batch:
         if not isinstance(entry, dict) or not isinstance(entry.get("inputs"), dict):
             raise PrimitiveError("a batch item has no inputs object")
-        item_id = entry.get("id")
-        if not isinstance(item_id, str) or not item_id:
-            raise PrimitiveError("a batch item has no id")
+        test = entry.get("test")
+        if not isinstance(test, str) or not test:
+            raise PrimitiveError("a batch item has no test")
         inputs = entry["inputs"]
-        actual = input_file(root, inputs, "actual", item_id)
-        expected = input_file(root, inputs, "expected", item_id)
-        items.append((item_id, actual, expected))
+        actual = input_file(root, inputs, "actual", test)
+        expected = input_file(root, inputs, "expected", test)
+        items.append((test, actual, expected))
     return items
 
 
-def input_file(root: Path, inputs: dict[str, object], name: str, item_id: str) -> Path:
+def input_file(root: Path, inputs: dict[str, object], name: str, test: str) -> Path:
     """Resolve a file input to a path, refusing anything outside `in/`."""
     value = inputs.get(name)
     if not isinstance(value, dict) or not isinstance(value.get("file"), str):
-        raise PrimitiveError(f"the input named {name} of item {item_id} is not a file")
+        raise PrimitiveError(f"the input named {name} of test {test} is not a file")
     path = (root / str(value["file"])).resolve()
     if not path.is_relative_to((root / "in").resolve()):
-        raise PrimitiveError(f"the input named {name} of item {item_id} is outside in/")
+        raise PrimitiveError(f"the input named {name} of test {test} is outside in/")
     if not path.is_file():
         raise PrimitiveError(
-            f"the input named {name} of item {item_id} is not in the working directory"
+            f"the input named {name} of test {test} is not in the working directory"
         )
     return path
 
 
 def check(actual: Path, expected: Path) -> dict[str, object]:
-    """Compare two files and return the outcome and the points."""
+    """Compare two files and return the outcome."""
     if same(actual, expected):
-        return {"outcome": "accepted", "points": 1}
-    return {"outcome": "wrong_answer", "points": 0}
+        return {"outcome": "accepted"}
+    return {"outcome": "wrong_answer"}
 
 
 def same(actual: Path, expected: Path) -> bool:
     """Whether two files match, ignoring trailing whitespace and trailing blank lines.
 
-    Lines are compared one by one while both files have them. Once one file
-    runs out, everything left in the other must be blank, which is what
-    ignoring trailing blank lines means; that rest is read in large blocks,
-    so a program that prints millions of empty lines after a right answer is
-    judged in a moment rather than one line at a time past the time limit.
+    The files are read in blocks of `BLOCK` bytes. Blocks that are the same
+    byte for byte are passed over, so two identical files are compared at the
+    speed of reading them. From the first blocks that differ, each file's
+    lines have their trailing whitespace taken out (see `trimmed`) and the two
+    trimmed streams are compared. Leaving out the same bytes from the start of
+    both does not change the answer, even when they end inside a line: what is
+    left of that line in each is compared, trimmed, as the whole line would
+    be. Once one stream runs out, all that is left of the other must be
+    newlines, which is what ignoring trailing blank lines means.
     """
     with actual.open("rb") as left, expected.open("rb") as right:
+        while (a := left.read(BLOCK)) == (b := right.read(BLOCK)):
+            if not a:
+                return True
+        ours, theirs = trimmed(a, left), trimmed(b, right)
+        a = b = b""
         while True:
-            a, b = left.readline(), right.readline()
+            a = a or next(ours, b"")
+            b = b or next(theirs, b"")
             if not a or not b:
-                return blank_from(a, left) and blank_from(b, right)
-            if a.rstrip() != b.rstrip():
+                break
+            length = min(len(a), len(b))
+            if a[:length] != b[:length]:
                 return False
+            a, b = a[length:], b[length:]
+        rest, more = (a, ours) if a else (b, theirs)
+        return not rest.strip(b"\n") and not any(block.strip(b"\n") for block in more)
 
 
-def blank_from(line: bytes, rest: BinaryIO) -> bool:
-    """Whether `line` and everything after it in `rest` is whitespace."""
-    if line.strip():
-        return False
-    while block := rest.read(BLOCK):
-        if block.strip():
-            return False
-    return True
+def trimmed(first: bytes, stream: BinaryIO) -> Iterator[bytes]:
+    """`first` and the rest of the stream with each line's trailing whitespace
+    taken out, in non-empty blocks.
+
+    The whitespace at the end of what has been read so far is held back, in
+    the blocks it was read in, until the next byte that is not whitespace
+    shows whether it ends a line: a newline drops it, anything else lets it
+    through. At the end of the stream it is dropped.
+    """
+    held: list[bytes] = []
+    start = (first,) if first else ()
+    for block in chain(start, iter(lambda: stream.read(BLOCK), b"")):
+        kept = block.rstrip(LINE_SPACE)
+        if not kept:
+            held.append(block)
+            continue
+        if held and not block.lstrip(LINE_SPACE).startswith(b"\n"):
+            yield from held
+        held = [block[len(kept) :]] if len(kept) < len(block) else []
+        yield trim_lines(kept)
+
+
+def trim_lines(data: bytes) -> bytes:
+    """`data` with the whitespace before each of its newlines taken out.
+
+    Each pass takes one whitespace byte from before every newline, searching
+    and replacing at the speed of the bytes methods, so the usual one or two
+    (a space, a carriage return) go in a pass or two. Whitespace still left
+    after `TRIM_PASSES` passes is on lines longer than that, so there are few
+    of them, and the data is then split into lines and each one trimmed.
+    """
+    for _ in range(TRIM_PASSES):
+        ends = [end for end in LINE_ENDS if end in data]
+        if not ends:
+            return data
+        for end in ends:
+            data = data.replace(end, b"\n")
+    return b"\n".join([line.rstrip(LINE_SPACE) for line in data.split(b"\n")])
 
 
 def write_json(path: Path, document: dict[str, object]) -> None:
