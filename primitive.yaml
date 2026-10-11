@@ -1,8 +1,18 @@
+title: Compare with the answer
+description: Compares a program's output with the answer, ignoring trailing whitespace.
 batch: true
 network: false
 limits: {time_ms: 2000, cpu_ms: 2000, memory_mb: 256, pids: 32, output_mb: 1, gpus: 0}
 inputs:
-  actual: {type: file, runs: false}
-  expected: {type: file, runs: false}
+  actual:
+    type: file
+    runs: false
+    description: What the program printed.
+  expected:
+    type: file
+    runs: false
+    description: The expected answer, from the task.
 outputs:
-  outcome: {type: outcome}
+  outcome:
+    type: outcome
+    description: Accepted when the two match, wrong answer when they do not.
