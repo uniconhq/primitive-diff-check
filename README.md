@@ -24,7 +24,7 @@ order of the items. Each item has these inputs and outputs.
 |---|---|---|---|
 | Input | `actual` | file, `runs: false` | What the program printed |
 | Input | `expected` | file, `runs: false` | The expected answer, from the task |
-| Output | `outcome` | outcome | `accepted` when the two match, `wrong_answer` when they do not |
+| Output | `outcome` | outcome | `accepted` when the two match, `wrong_answer` when they do not; `primitive.yaml` says the same under `outcomes`, for the workflow editor |
 
 Both inputs are files it reads as data: it runs nothing from either, so
 handing it a task file the contestant is not served seals no step. It writes
@@ -91,6 +91,10 @@ tests/                      unit tests, and image tests that run it on Docker
 
 `primitive.yaml` has no `image` line here: bootstrap writes the image by
 digest, from the release manifest, into the version it creates at the forge.
+Its `title`, its `description`s and the `outcome` port's `outcomes`, each
+outcome the program can report with a line saying when, are what the
+workflow editor shows; a test keeps `outcomes` to exactly the outcomes a
+check gives.
 
 ## Running it locally
 
