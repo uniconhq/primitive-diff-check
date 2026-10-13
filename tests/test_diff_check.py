@@ -9,7 +9,35 @@ from typing import Any
 import pytest
 
 import diff_check
-from support import batch_inputs, write
+from support import batch_inputs, declaration, returned_outcomes, write
+
+
+def test_the_declaration_says_what_each_outcome_it_reports_means(
+    tmp_path: Path,
+) -> None:
+    """The outcome port's outcomes are exactly the ones a check gives, each
+    with a line saying when, for the workflow editor's drawer."""
+    same = write(tmp_path / "same", b"4\n")
+    other = write(tmp_path / "other", b"5\n")
+    reported = {
+        diff_check.check(same, same)["outcome"],
+        diff_check.check(same, other)["outcome"],
+    }
+
+    outcomes = declaration()["outputs"]["outcome"]["outcomes"]
+
+    assert list(outcomes) == ["accepted", "wrong_answer"]
+    assert set(outcomes) == reported
+    assert all(isinstance(when, str) and "\n" not in when for when in outcomes.values())
+
+
+def test_the_declaration_says_every_outcome_a_check_can_give() -> None:
+    """The declared outcomes are every one `check` can return, read from its
+    source, so a new way to an outcome needs its line too.
+    """
+    outcomes = declaration()["outputs"]["outcome"]["outcomes"]
+
+    assert set(outcomes) == returned_outcomes(diff_check.check)
 
 
 @pytest.mark.parametrize(
